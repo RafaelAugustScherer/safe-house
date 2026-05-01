@@ -87,6 +87,17 @@ export const lootRoll = (
 export const useCrowbar = (roomId: string, userId: string): Promise<unknown> =>
   emitAck("loot:use-crowbar", { roomId, userId });
 
+export const fightAttack = (
+  roomId: string,
+  userId: string,
+  weaponKey: string,
+  value: number,
+): Promise<{ killed: boolean; infected: boolean; bonus: boolean; soundPenalty: boolean }> =>
+  emitAck("fight:attack", { roomId, userId, weaponKey, value });
+
+export const fightFlee = (roomId: string, userId: string): Promise<unknown> =>
+  emitAck("fight:flee", { roomId, userId });
+
 // Subscribe to push events from a single room.
 export function onSnapshot(handler: (snap: RoomSnapshot) => void): () => void {
   const sock = getSocket();

@@ -370,9 +370,153 @@ export async function playerMove(
           availableCells: [cell],
         },
       });
+      return { won: false };
+    }
+
+    // Otherwise, check for adjacent zombies/hordes and transition to FIGHT.
+    const zombiesNearby = await zombiesAdjacentTo(tx, roomId, cell);
+    if (zombiesNearby.length > 0) {
+      const horde = zombiesNearby.find((z) => z.kind === "HORDE");
+      await tx.turn.update({
+        where: { roomId },
+        data: {
+          stage: horde ? TURN_STAGES.HORDE_FIGHT : TURN_STAGES.FIGHT,
+          // Stash the threat zombieId in availableCells[0] so the resolution
+          // step can find it without re-deriving from position.
+          availableCells: [String(horde ? horde.zombieId : zombiesNearby[0].zombieId)],
+        },
+      });
     }
 
     return { won: false };
+  });
+}
+
+// Manhattan-adjacent (4-connected) zombies/hordes to a cell.
+async function zombiesAdjacentTo(
+  tx: Prisma.TransactionClient,
+  roomId: string,
+  cell: string,
+) {
+  const row = cell[0] as BoardRow;
+  const col = parseInt(cell.slice(1), 10);
+  const rows = Object.keys(BOARD) as BoardRow[];
+  const rowIdx = rows.indexOf(row);
+  const candidates: string[] = [];
+  if (col > 1) candidates.push(`${row}${col - 1}`);
+  if (col < 8) candidates.push(`${row}${col + 1}`);
+  if (rowIdx > 0) candidates.push(`${rows[rowIdx - 1]}${col}`);
+  if (rowIdx < rows.length - 1) candidates.push(`${rows[rowIdx + 1]}${col}`);
+  return tx.zombie.findMany({
+    where: { roomId, position: { in: candidates } },
+  });
+}
+
+// --- Combat ------------------------------------------------------------------
+
+export async function fightAttack(
+  roomId: string,
+  userId: string,
+  weaponKey: string,
+  rollValue: number,
+): Promise<{ killed: boolean; infected: boolean; bonus: boolean; soundPenalty: boolean }> {
+  if (rollValue < 1 || rollValue > 6) {
+    throw new EngineError("INVALID_ROLL", "Roll must be 1-6");
+  }
+  return prisma.$transaction(async (tx) => {
+    const turn = must(
+      await tx.turn.findUnique({ where: { roomId } }),
+      "TURN_NOT_FOUND",
+      "Turn not initialized",
+    );
+    if (turn.currentUserId !== userId) {
+      throw new EngineError("NOT_YOUR_TURN", "Not your turn");
+    }
+    const isFight = turn.stage === TURN_STAGES.FIGHT;
+    const isHorde = turn.stage === TURN_STAGES.HORDE_FIGHT;
+    if (!isFight && !isHorde) {
+      throw new EngineError("WRONG_STAGE", `Cannot attack in stage ${turn.stage}`);
+    }
+    const weaponCard = findCardByKey(weaponKey);
+    if (!weaponCard || !("normalValue" in weaponCard)) {
+      throw new EngineError("INVALID_WEAPON", "Card is not a weapon");
+    }
+    const inHand = await tx.playerCard.findFirst({
+      where: { roomId, userId, cardKey: weaponKey },
+    });
+    if (!inHand) throw new EngineError("WEAPON_NOT_IN_HAND", "You don't have that weapon");
+
+    const isFirearm = weaponCard.cardAction === GAME.CARDS_ACTIONS.GUN_ATTACK;
+    const success = rollValue >= weaponCard.normalValue;
+    const bonus =
+      success && weaponCard.specialValue > 0 && rollValue >= 6 - weaponCard.specialValue;
+
+    const zombieId = parseInt((turn.availableCells as string[])[0] ?? "0", 10);
+    const zombie = await tx.zombie.findUnique({
+      where: { roomId_zombieId: { roomId, zombieId } },
+    });
+
+    let killed = false;
+    let infected = false;
+    if (success && zombie) {
+      // Single zombies and hordes both die on a successful attack — hordes
+      // require the bonus tier (`specialValue`) for now to keep the rules
+      // simple; ordinary success against a horde just scares it off without
+      // a kill (see Step 4.6 horde retreat).
+      if (zombie.kind === "SINGLE" || bonus) {
+        await tx.zombie.delete({
+          where: { roomId_zombieId: { roomId, zombieId } },
+        });
+        killed = true;
+        await tx.roomUser.update({
+          where: { roomId_userId: { roomId, userId } },
+          data: { points: { increment: bonus ? 20 : 10 } },
+        });
+      }
+    } else if (!success && isFirearm) {
+      // Failed firearm shot: infection. Cured if MEDICINE is consumed within
+      // 2 turns (Step 4.8 enforces death otherwise).
+      infected = true;
+      await tx.roomUser.update({
+        where: { roomId_userId: { roomId, userId } },
+        data: { infectedUntilTurn: turn.turnNumber + 2 },
+      });
+    }
+
+    // Return to MOVE stage with whatever movements remain.
+    await tx.turn.update({
+      where: { roomId },
+      data: { stage: TURN_STAGES.MOVE, availableCells: [] },
+    });
+
+    return {
+      killed,
+      infected,
+      bonus,
+      soundPenalty: weaponCard.soundPenalty && (success || isFirearm),
+    };
+  });
+}
+
+// Flee: skip the fight and continue moving with whatever movements remain.
+// No penalty for now; vehicle-assisted flee can be richer in 4.7.
+export async function fightFlee(roomId: string, userId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const turn = must(
+      await tx.turn.findUnique({ where: { roomId } }),
+      "TURN_NOT_FOUND",
+      "Turn not initialized",
+    );
+    if (turn.currentUserId !== userId) {
+      throw new EngineError("NOT_YOUR_TURN", "Not your turn");
+    }
+    if (turn.stage !== TURN_STAGES.FIGHT && turn.stage !== TURN_STAGES.HORDE_FIGHT) {
+      throw new EngineError("WRONG_STAGE", "Not in a fight");
+    }
+    await tx.turn.update({
+      where: { roomId },
+      data: { stage: TURN_STAGES.MOVE, availableCells: [] },
+    });
   });
 }
 

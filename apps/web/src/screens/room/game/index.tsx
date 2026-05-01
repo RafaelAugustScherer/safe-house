@@ -2,6 +2,7 @@ import React from "react";
 import Board from "./board";
 import UserRolls from "./user-rolls";
 import LootModal from "./loot-modal";
+import FightModal from "./fight-modal";
 import { CardHand } from "../../../components";
 import type { RoomSnapshot } from "../../../services";
 
@@ -17,6 +18,7 @@ const Game = ({ myUserId, room, roomId }: GameProps) => {
     <>
       <UserRolls myUserId={myUserId} room={room} roomId={roomId} />
       <LootModal myUserId={myUserId} room={room} roomId={roomId} />
+      <FightModal myUserId={myUserId} room={room} roomId={roomId} />
       <Board myUserId={myUserId} room={room} roomId={roomId} />
       <CardHand cardKeys={myCards} />
     </>

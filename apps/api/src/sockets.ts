@@ -10,6 +10,8 @@ import {
   playerMove,
   lootRoll,
   useCrowbar,
+  fightAttack,
+  fightFlee,
   markUserOffline,
   scheduleRoomCleanup,
   tick,
@@ -172,6 +174,34 @@ export function registerHandlers(io: Server, socket: Socket): void {
     (input: { roomId: string; userId: string }, ack: Ack<{ ok: true }>) =>
       safe(async () => {
         await useCrowbar(input.roomId, input.userId);
+        await broadcast(io, input.roomId);
+        return { ok: true as const };
+      }, ack),
+  );
+
+  socket.on(
+    "fight:attack",
+    (
+      input: { roomId: string; userId: string; weaponKey: string; value: number },
+      ack: Ack<{ killed: boolean; infected: boolean; bonus: boolean; soundPenalty: boolean }>,
+    ) =>
+      safe(async () => {
+        const result = await fightAttack(
+          input.roomId,
+          input.userId,
+          input.weaponKey,
+          input.value,
+        );
+        await broadcast(io, input.roomId);
+        return result;
+      }, ack),
+  );
+
+  socket.on(
+    "fight:flee",
+    (input: { roomId: string; userId: string }, ack: Ack<{ ok: true }>) =>
+      safe(async () => {
+        await fightFlee(input.roomId, input.userId);
         await broadcast(io, input.roomId);
         return { ok: true as const };
       }, ack),
