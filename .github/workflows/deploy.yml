@@ -1,0 +1,58 @@
+name: Deploy Docker
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Write .env from secrets
+        run: |
+          umask 077
+          cat > .env <<'EOF'
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          PUBLIC_DOMAIN=${{ secrets.PUBLIC_DOMAIN }}
+          PUBLIC_ORIGIN=${{ secrets.PUBLIC_ORIGIN }}
+          EOF
+
+      - name: Build and start stack
+        run: docker compose up -d --build --remove-orphans
+
+      - name: Wait for API health
+        run: |
+          # node:24-alpine has no curl/wget on the path; use Node's fetch.
+          probe='fetch("http://localhost:4000/health").then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))'
+          for i in $(seq 1 30); do
+            if docker compose exec -T api node -e "$probe" >/dev/null 2>&1; then
+              echo "API healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API failed health check"
+          exit 1
+
+      - name: Dump compose state on failure
+        if: failure()
+        run: |
+          echo "=== docker compose ps ==="
+          docker compose ps -a
+          echo "=== docker compose logs (all services) ==="
+          docker compose logs --tail=200 --no-color
+
+      - name: Remove .env from workspace
+        if: always()
+        run: rm -f .env
+
+      - name: Prune dangling images
+        if: always()
+        run: docker image prune -f
