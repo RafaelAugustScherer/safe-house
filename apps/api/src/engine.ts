@@ -392,6 +392,59 @@ export async function playerMove(
   });
 }
 
+// --- Sound penalty -----------------------------------------------------------
+//
+// Advance the nearest horde one cell toward the noisy player. Called after
+// firearm attacks, failed loot rolls, and vehicle moves.
+async function applySoundPenalty(
+  tx: Prisma.TransactionClient,
+  roomId: string,
+  playerCell: string,
+): Promise<void> {
+  const hordes = await tx.zombie.findMany({
+    where: { roomId, kind: "HORDE" },
+  });
+  if (hordes.length === 0) return;
+  const [pRow, pCol] = parseCell(playerCell);
+  const rows = Object.keys(BOARD) as BoardRow[];
+  const pRowIdx = rows.indexOf(pRow);
+
+  // Pick the closest horde (Manhattan distance).
+  let nearest = hordes[0];
+  let nearestDist = manhattan(pRowIdx, pCol, rows.indexOf(nearest.position[0] as BoardRow), parseInt(nearest.position.slice(1), 10));
+  for (const h of hordes.slice(1)) {
+    const d = manhattan(pRowIdx, pCol, rows.indexOf(h.position[0] as BoardRow), parseInt(h.position.slice(1), 10));
+    if (d < nearestDist) {
+      nearest = h;
+      nearestDist = d;
+    }
+  }
+
+  // Step one cell toward the player, axis-by-axis (greater delta first).
+  const [hRow, hCol] = parseCell(nearest.position);
+  const hRowIdx = rows.indexOf(hRow);
+  const dr = pRowIdx - hRowIdx;
+  const dc = pCol - hCol;
+  let nextRowIdx = hRowIdx;
+  let nextCol = hCol;
+  if (Math.abs(dr) >= Math.abs(dc) && dr !== 0) {
+    nextRowIdx = hRowIdx + Math.sign(dr);
+  } else if (dc !== 0) {
+    nextCol = hCol + Math.sign(dc);
+  }
+  const nextCell = `${rows[nextRowIdx]}${nextCol}`;
+  await tx.zombie.update({
+    where: { roomId_zombieId: { roomId, zombieId: nearest.zombieId } },
+    data: { position: nextCell },
+  });
+}
+
+const parseCell = (cell: string): [BoardRow, number] =>
+  [cell[0] as BoardRow, parseInt(cell.slice(1), 10)] as [BoardRow, number];
+
+const manhattan = (r1: number, c1: number, r2: number, c2: number) =>
+  Math.abs(r1 - r2) + Math.abs(c1 - c2);
+
 // Manhattan-adjacent (4-connected) zombies/hordes to a cell.
 async function zombiesAdjacentTo(
   tx: Prisma.TransactionClient,
@@ -489,12 +542,15 @@ export async function fightAttack(
       data: { stage: TURN_STAGES.MOVE, availableCells: [] },
     });
 
-    return {
-      killed,
-      infected,
-      bonus,
-      soundPenalty: weaponCard.soundPenalty && (success || isFirearm),
-    };
+    const noisy = weaponCard.soundPenalty && (success || isFirearm);
+    if (noisy) {
+      const player = await tx.roomUser.findUnique({
+        where: { roomId_userId: { roomId, userId } },
+      });
+      if (player?.position) await applySoundPenalty(tx, roomId, player.position);
+    }
+
+    return { killed, infected, bonus, soundPenalty: noisy };
   });
 }
 
@@ -582,6 +638,12 @@ export async function lootRoll(
     const threshold = isChest ? LOOT_THRESHOLD.CHEST : LOOT_THRESHOLD.TENT;
     const success = rollValue >= threshold;
     await finishLoot(tx, roomId, userId, cell, success);
+    if (!success) {
+      const player = await tx.roomUser.findUnique({
+        where: { roomId_userId: { roomId, userId } },
+      });
+      if (player?.position) await applySoundPenalty(tx, roomId, player.position);
+    }
     return { success, soundPenalty: !success };
   });
 }
