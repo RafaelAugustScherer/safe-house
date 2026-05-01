@@ -40,12 +40,13 @@ COPY --from=build /app/packages/shared/package.json ./packages/shared/package.js
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
+COPY apps/api/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /app/apps/api
 
 EXPOSE 4000
 
-# Apply pending DB migrations on boot, then start the server.
-# Invoke prisma via the local bin to avoid npx fetching a newer Prisma 7
-# from the registry (which has incompatible schema requirements).
-CMD ["sh", "-c", "/app/node_modules/.bin/prisma migrate deploy && node dist/index.js"]
+# Build DATABASE_URL with proper URL-encoding (so passwords with ':' / '@' /
+# '/' / '?' / '#' work), apply pending migrations, then start the server.
+CMD ["/usr/local/bin/docker-entrypoint.sh"]

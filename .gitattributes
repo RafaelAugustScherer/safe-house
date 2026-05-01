@@ -1,0 +1,6 @@
+* text=auto
+
+# Shell scripts must keep LF line endings; CRLF breaks the shebang on Linux.
+*.sh text eol=lf
+Dockerfile text eol=lf
+docker-entrypoint.sh text eol=lf
