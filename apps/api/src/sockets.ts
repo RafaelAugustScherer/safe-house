@@ -8,6 +8,8 @@ import {
   rollInitial,
   rollNormal,
   playerMove,
+  lootRoll,
+  useCrowbar,
   markUserOffline,
   scheduleRoomCleanup,
   tick,
@@ -149,6 +151,29 @@ export function registerHandlers(io: Server, socket: Socket): void {
         const result = await playerMove(input.roomId, input.userId, input.cell);
         await broadcast(io, input.roomId);
         return result;
+      }, ack),
+  );
+
+  socket.on(
+    "loot:roll",
+    (
+      input: { roomId: string; userId: string; value: number },
+      ack: Ack<{ success: boolean; soundPenalty: boolean }>,
+    ) =>
+      safe(async () => {
+        const result = await lootRoll(input.roomId, input.userId, input.value);
+        await broadcast(io, input.roomId);
+        return result;
+      }, ack),
+  );
+
+  socket.on(
+    "loot:use-crowbar",
+    (input: { roomId: string; userId: string }, ack: Ack<{ ok: true }>) =>
+      safe(async () => {
+        await useCrowbar(input.roomId, input.userId);
+        await broadcast(io, input.roomId);
+        return { ok: true as const };
       }, ack),
   );
 

@@ -353,7 +353,134 @@ export async function playerMove(
         availableCells: [], // tick() will recompute
       },
     });
+
+    // If the player landed on an unlooted chest/tent, suspend movement and
+    // enter the loot stage. tick() will pick up MOVE again after resolution.
+    const tile = await tx.boardTile.findUnique({
+      where: { roomId_cell: { roomId, cell } },
+    });
+    if (tile && !tile.looted && tile.tileType !== "EMPTY") {
+      await tx.turn.update({
+        where: { roomId },
+        data: {
+          stage:
+            tile.tileType === "CHEST"
+              ? TURN_STAGES.OPEN_CHEST
+              : TURN_STAGES.ENTER_TENT,
+          availableCells: [cell],
+        },
+      });
+    }
+
     return { won: false };
+  });
+}
+
+// --- Loot resolution ---------------------------------------------------------
+//
+// Chest: needs roll ≥ 4 to open (or auto-open with a crowbar). Failure makes
+// noise and triggers sound penalty (Step 4.5 will hook into this).
+// Tent: needs roll ≥ 3. Failure also triggers sound penalty.
+// Success draws one card from the green deck onto the player's hand.
+const LOOT_THRESHOLD = { CHEST: 4, TENT: 3 } as const;
+
+async function finishLoot(
+  tx: Prisma.TransactionClient,
+  roomId: string,
+  userId: string,
+  cell: string,
+  success: boolean,
+): Promise<void> {
+  await tx.boardTile.update({
+    where: { roomId_cell: { roomId, cell } },
+    data: { looted: true },
+  });
+  if (success) {
+    await drawCard(tx, roomId, userId, "GREEN");
+    await tx.roomUser.update({
+      where: { roomId_userId: { roomId, userId } },
+      data: { points: { increment: 5 } },
+    });
+  }
+  // Return to MOVE stage so the player can spend remaining movements.
+  await tx.turn.update({
+    where: { roomId },
+    data: { stage: TURN_STAGES.MOVE, availableCells: [] },
+  });
+}
+
+export async function lootRoll(
+  roomId: string,
+  userId: string,
+  rollValue: number,
+): Promise<{ success: boolean; soundPenalty: boolean }> {
+  if (rollValue < 1 || rollValue > 6) {
+    throw new EngineError("INVALID_ROLL", "Roll must be 1-6");
+  }
+  return prisma.$transaction(async (tx) => {
+    const turn = must(
+      await tx.turn.findUnique({ where: { roomId } }),
+      "TURN_NOT_FOUND",
+      "Turn not initialized",
+    );
+    if (turn.currentUserId !== userId) {
+      throw new EngineError("NOT_YOUR_TURN", "Not your turn");
+    }
+    const isChest = turn.stage === TURN_STAGES.OPEN_CHEST;
+    const isTent = turn.stage === TURN_STAGES.ENTER_TENT;
+    if (!isChest && !isTent) {
+      throw new EngineError("WRONG_STAGE", `Cannot loot in stage ${turn.stage}`);
+    }
+    const cells = (turn.availableCells as string[]) ?? [];
+    const cell = cells[0];
+    if (!cell) throw new EngineError("NO_CELL", "No loot target");
+
+    const threshold = isChest ? LOOT_THRESHOLD.CHEST : LOOT_THRESHOLD.TENT;
+    const success = rollValue >= threshold;
+    await finishLoot(tx, roomId, userId, cell, success);
+    return { success, soundPenalty: !success };
+  });
+}
+
+// Crowbar auto-opens a chest with no roll and no sound. Consumes the crowbar
+// (returns it to the green discard pile so it can recycle later).
+export async function useCrowbar(roomId: string, userId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const turn = must(
+      await tx.turn.findUnique({ where: { roomId } }),
+      "TURN_NOT_FOUND",
+      "Turn not initialized",
+    );
+    if (turn.currentUserId !== userId) {
+      throw new EngineError("NOT_YOUR_TURN", "Not your turn");
+    }
+    if (turn.stage !== TURN_STAGES.OPEN_CHEST) {
+      throw new EngineError("WRONG_STAGE", "Crowbar only works on chests");
+    }
+    const cell = ((turn.availableCells as string[]) ?? [])[0];
+    if (!cell) throw new EngineError("NO_CELL", "No loot target");
+
+    const crowbar = await tx.playerCard.findFirst({
+      where: { roomId, userId, cardKey: "crowbar" },
+    });
+    if (!crowbar) throw new EngineError("NO_CROWBAR", "Player has no crowbar");
+
+    // Discard the crowbar back to the green deck's discard pile.
+    await tx.playerCard.delete({
+      where: { roomId_userId_cardKey: { roomId, userId, cardKey: "crowbar" } },
+    });
+    const greenDeck = await tx.deck.findUnique({
+      where: { roomId_deck: { roomId, deck: "GREEN" } },
+    });
+    if (greenDeck) {
+      const discard = [...((greenDeck.discard as string[]) ?? []), "crowbar"];
+      await tx.deck.update({
+        where: { roomId_deck: { roomId, deck: "GREEN" } },
+        data: { discard },
+      });
+    }
+
+    await finishLoot(tx, roomId, userId, cell, true);
   });
 }
 

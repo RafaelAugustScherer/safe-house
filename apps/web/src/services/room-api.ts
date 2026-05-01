@@ -77,6 +77,16 @@ export const rollNormal = (
 export const playerMove = (roomId: string, userId: string, cell: string): Promise<{ won: boolean }> =>
   emitAck("move", { roomId, userId, cell });
 
+export const lootRoll = (
+  roomId: string,
+  userId: string,
+  value: number,
+): Promise<{ success: boolean; soundPenalty: boolean }> =>
+  emitAck("loot:roll", { roomId, userId, value });
+
+export const useCrowbar = (roomId: string, userId: string): Promise<unknown> =>
+  emitAck("loot:use-crowbar", { roomId, userId });
+
 // Subscribe to push events from a single room.
 export function onSnapshot(handler: (snap: RoomSnapshot) => void): () => void {
   const sock = getSocket();
