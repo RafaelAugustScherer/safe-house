@@ -33,6 +33,9 @@ export interface RoomSnapshot {
     turnNumber: number;
   } | null;
   zombies: Record<string, { id: number; position: string; kind: string }>;
+  tiles: Record<string, { cell: string; tileType: string; looted: boolean }>;
+  cards: Record<string, string[]>; // userId → array of card keys
+  deckCounts: { red: number; green: number; blue: number };
   userWinner: string | null;
 }
 
@@ -43,9 +46,24 @@ export async function buildSnapshot(roomId: string): Promise<RoomSnapshot | null
       users: { orderBy: { joinedAt: "asc" } },
       turn: true,
       zombies: true,
+      tiles: true,
+      cards: true,
+      decks: true,
     },
   });
   if (!room) return null;
+
+  const cardsByUser: Record<string, string[]> = {};
+  for (const c of room.cards) {
+    (cardsByUser[c.userId] ??= []).push(c.cardKey);
+  }
+  const deckCounts = { red: 0, green: 0, blue: 0 };
+  for (const d of room.decks) {
+    const n = (d.cards as string[]).length;
+    if (d.deck === "RED") deckCounts.red = n;
+    else if (d.deck === "GREEN") deckCounts.green = n;
+    else if (d.deck === "BLUE") deckCounts.blue = n;
+  }
 
   const sequence = [...room.users]
     .filter((u) => u.turnOrder !== null)
@@ -92,6 +110,14 @@ export async function buildSnapshot(roomId: string): Promise<RoomSnapshot | null
         { id: z.zombieId, position: z.position, kind: z.kind.toLowerCase() },
       ]),
     ),
+    tiles: Object.fromEntries(
+      room.tiles.map((t) => [
+        t.cell,
+        { cell: t.cell, tileType: t.tileType.toLowerCase(), looted: t.looted },
+      ]),
+    ),
+    cards: cardsByUser,
+    deckCounts,
     userWinner:
       room.status === "FINISHED"
         ? (room.users.find((u) => u.position?.startsWith("a"))?.userId ?? null)

@@ -20,6 +20,9 @@ export const TENT_POSITIONS = shared.TENT_POSITIONS;
 export const SPAWN_ROW = shared.SPAWN_ROW;
 export const SAFE_HOUSE_ROW = shared.SAFE_HOUSE_ROW;
 export const getNextLineBoardId = shared.getNextLineBoardId;
+export const findCardByKey = shared.findCardByKey;
+export const buildDecks = shared.buildDecks;
+export const cardSlotForType = shared.cardSlotForType;
 
 export type BoardRow = shared.BoardRow;
 export type BoardColumn = shared.BoardColumn;
@@ -34,6 +37,7 @@ export type CardAction = shared.CardAction;
 export type ItemCard = shared.ItemCard;
 export type WeaponCard = shared.WeaponCard;
 export type VehicleCard = shared.VehicleCard;
+export type AnyCard = shared.AnyCard;
 
 export const getUniqueId = (): string => {
   const stored = localStorage.getItem("safehouse:uid");

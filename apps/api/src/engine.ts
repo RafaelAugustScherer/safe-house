@@ -9,6 +9,11 @@ import {
   ACTIONS,
   SPAWN_ROW,
   BOARD,
+  CHEST_POSITIONS,
+  TENT_POSITIONS,
+  buildDecks,
+  findCardByKey,
+  cardSlotForType,
   type BoardRow,
   type BoardCell,
 } from "@safehouse/shared";
@@ -50,6 +55,8 @@ export async function createRoom(input: CreateRoomInput): Promise<string> {
   }
 
   const roomId = randomUUID();
+  const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+  const decks = buildDecks(seed);
 
   await prisma.$transaction(async (tx) => {
     await tx.room.create({
@@ -73,11 +80,59 @@ export async function createRoom(input: CreateRoomInput): Promise<string> {
             kind: z.kind === "horde" ? "HORDE" : "SINGLE",
           })),
         },
+        decks: {
+          create: [
+            { deck: "RED", cards: decks.red, discard: [] },
+            { deck: "GREEN", cards: decks.green, discard: [] },
+            { deck: "BLUE", cards: decks.blue, discard: [] },
+          ],
+        },
+        tiles: {
+          create: [
+            ...CHEST_POSITIONS.map((cell) => ({ cell, tileType: "CHEST" as const })),
+            ...TENT_POSITIONS.map((cell) => ({ cell, tileType: "TENT" as const })),
+          ],
+        },
       },
     });
   });
 
   return roomId;
+}
+
+// Draw the top card of a deck and assign it to the user. If the deck is
+// empty, reshuffle the discard pile back into it. Returns the drawn card key.
+async function drawCard(
+  tx: Prisma.TransactionClient,
+  roomId: string,
+  userId: string,
+  deck: "RED" | "GREEN" | "BLUE",
+): Promise<string | null> {
+  const row = await tx.deck.findUnique({ where: { roomId_deck: { roomId, deck } } });
+  if (!row) return null;
+  let cards = row.cards as string[];
+  let discard = row.discard as string[];
+  if (cards.length === 0) {
+    if (discard.length === 0) return null;
+    // Reshuffle discard back into deck.
+    const seed = (Date.now() & 0xffffffff) >>> 0;
+    cards = (await import("@safehouse/shared")).shuffleDeck(discard, seed);
+    discard = [];
+  }
+  const [drawn, ...rest] = cards;
+  await tx.deck.update({
+    where: { roomId_deck: { roomId, deck } },
+    data: { cards: rest, discard },
+  });
+  const card = findCardByKey(drawn);
+  if (!card) return null;
+  const slot = cardSlotForType(card.type);
+  await tx.playerCard.upsert({
+    where: { roomId_userId_cardKey: { roomId, userId, cardKey: drawn } },
+    create: { roomId, userId, cardKey: drawn, slot },
+    update: {},
+  });
+  return drawn;
 }
 
 export async function joinRoom(
@@ -330,18 +385,23 @@ export async function tick(roomId: string): Promise<void> {
     return tick(roomId);
   }
 
-  // 2. Card-deal stage: assign turn order by initRollValue desc, transition
-  // to MOVE_ROLL for first player. Step 4.1 will replace the empty deal
-  // with real card distribution; for now we just sequence the players.
+  // 2. Card-deal stage: assign turn order by initRollValue desc, deal one
+  // card to each player based on roll parity (even → item, odd → weapon),
+  // and transition to MOVE_ROLL for the first player.
   if (turn.stage === TURN_STAGES.GET_INITIAL_CARDS) {
-    const ordered = [...room.users]
-      .sort((a, b) => (b.initRollValue ?? 0) - (a.initRollValue ?? 0));
+    const ordered = [...room.users].sort(
+      (a, b) => (b.initRollValue ?? 0) - (a.initRollValue ?? 0),
+    );
     await prisma.$transaction(async (tx) => {
       for (let i = 0; i < ordered.length; i++) {
+        const u = ordered[i];
         await tx.roomUser.update({
-          where: { roomId_userId: { roomId, userId: ordered[i].userId } },
+          where: { roomId_userId: { roomId, userId: u.userId } },
           data: { turnOrder: i },
         });
+        const deck: "GREEN" | "RED" =
+          (u.initRollValue ?? 0) % 2 === 0 ? "GREEN" : "RED";
+        await drawCard(tx, roomId, u.userId, deck);
       }
       await tx.turn.update({
         where: { roomId },

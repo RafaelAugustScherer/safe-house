@@ -6,6 +6,7 @@ import Header from "./header/header";
 import User from "./user/user";
 import Modal from "./modal/modal";
 import CardRoom from "./card-room/card-room";
+import CardHand from "./card-hand/card-hand";
 import RequestUsername from "./request-username/request-username";
 
 export {
@@ -18,4 +19,5 @@ export {
   RequestUsername,
   Header,
   CardRoom,
+  CardHand,
 };

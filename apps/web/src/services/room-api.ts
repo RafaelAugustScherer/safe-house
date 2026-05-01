@@ -38,6 +38,9 @@ export interface RoomSnapshot {
     turnNumber: number;
   } | null;
   zombies: Record<string, { id: number; position: string; kind: string }>;
+  tiles: Record<string, { cell: string; tileType: string; looted: boolean }>;
+  cards: Record<string, string[]>;
+  deckCounts: { red: number; green: number; blue: number };
   userWinner: string | null;
 }
 

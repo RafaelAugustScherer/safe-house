@@ -30,6 +30,10 @@ const Board = ({ myUserId, room, roomId }: BoardProps) => {
   const renderCell = (lineId: string, cellIndex: number) => {
     const cellId = `${lineId}${cellIndex}`;
     let cellContent: React.ReactNode = cellId;
+    const tile = room.tiles?.[cellId];
+    if (tile && !tile.looted) {
+      cellContent = <Tile>{tile.tileType === "chest" ? "📦" : "⛺"}</Tile>;
+    }
 
     for (const player of players) {
       if (player.position === cellId) {
@@ -113,6 +117,9 @@ const Player = styled.span`
   background: red;
   color: white;
   padding: 0.5rem;
+`;
+const Tile = styled.span`
+  font-size: 1.5rem;
 `;
 const Zombie = styled(Player)`
   background: black;

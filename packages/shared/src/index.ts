@@ -376,3 +376,93 @@ export const getNextLineBoardId = (id: BoardRow): BoardRow | undefined => {
   const letters = Object.keys(BOARD) as BoardRow[];
   return letters[letters.findIndex((value) => value === id) - 1];
 };
+
+// -----------------------------------------------------------------------------
+// Deck composition
+// -----------------------------------------------------------------------------
+// The README specifies 42 cards (20 red, 12 green, 5 blue). The catalog has
+// fewer unique cards than the totals require, so the deck is built by
+// duplicating cards to reach the right totals.
+
+export type DeckColor = "red" | "green" | "blue";
+
+const GREEN_DECK_COMPOSITION: Array<[string, number]> = [
+  [CARDS.ITEMS.MEDICINE.key, 3],
+  [CARDS.ITEMS.BAG.key, 2],
+  [CARDS.ITEMS.CROWBAR.key, 2],
+  [CARDS.ITEMS.MAP.key, 3],
+  [CARDS.ITEMS.WALKIE_TALKIE.key, 2],
+];
+
+const RED_DECK_COMPOSITION: Array<[string, number]> = [
+  [CARDS.FIRE_GUNS.PISTOL.key, 3],
+  [CARDS.FIRE_GUNS.RIFLE.key, 2],
+  [CARDS.FIRE_GUNS.MACHINE_GUN.key, 2],
+  [CARDS.FIRE_GUNS.SHOTGUN.key, 3],
+  [CARDS.COLD_WEAPONS.CHAINSAW.key, 1],
+  [CARDS.COLD_WEAPONS.KNIFE.key, 2],
+  [CARDS.COLD_WEAPONS.SHOVEL.key, 2],
+  [CARDS.COLD_WEAPONS.BAT.key, 2],
+  [CARDS.COLD_WEAPONS.AXE.key, 2],
+  [CARDS.COLD_WEAPONS.MECHETE.key, 1],
+];
+
+const BLUE_DECK_COMPOSITION: Array<[string, number]> = [
+  [CARDS.VEHICLES.MOTORCYCLE.key, 1],
+  [CARDS.VEHICLES.BIKE.key, 1],
+  [CARDS.VEHICLES.BUGGY.key, 1],
+  [CARDS.VEHICLES.TRACTOR.key, 1],
+  [CARDS.VEHICLES.PICKUP.key, 1],
+];
+
+const expandComposition = (comp: Array<[string, number]>): string[] =>
+  comp.flatMap(([key, count]) => Array.from({ length: count }, () => key));
+
+// Mulberry32 PRNG: cheap, deterministic, good enough for game shuffling.
+const seededRng = (seed: number) => {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+export const shuffleDeck = (deck: string[], seed: number): string[] => {
+  const rng = seededRng(seed);
+  const result = [...deck];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+};
+
+export const buildDecks = (seed: number): Record<DeckColor, string[]> => ({
+  red: shuffleDeck(expandComposition(RED_DECK_COMPOSITION), seed ^ 0x12345),
+  green: shuffleDeck(expandComposition(GREEN_DECK_COMPOSITION), seed ^ 0x67890),
+  blue: shuffleDeck(expandComposition(BLUE_DECK_COMPOSITION), seed ^ 0xabcde),
+});
+
+// Lookup helpers: find a card definition by its key, regardless of category.
+export type AnyCard = ItemCard | WeaponCard | VehicleCard;
+const ALL_CARDS_BY_KEY: Record<string, AnyCard> = (() => {
+  const map: Record<string, AnyCard> = {};
+  for (const group of [CARDS.ITEMS, CARDS.FIRE_GUNS, CARDS.COLD_WEAPONS, CARDS.VEHICLES]) {
+    for (const card of Object.values(group)) {
+      map[card.key] = card as AnyCard;
+    }
+  }
+  return map;
+})();
+
+export const findCardByKey = (key: string): AnyCard | undefined => ALL_CARDS_BY_KEY[key];
+
+// Card slot inferred from card type.
+export const cardSlotForType = (type: CardType): "ITEM" | "WEAPON" | "VEHICLE" => {
+  if (type === CARDS_TYPES.GUN) return "WEAPON";
+  if (type === CARDS_TYPES.VEHICLE) return "VEHICLE";
+  return "ITEM";
+};
