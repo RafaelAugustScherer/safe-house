@@ -789,6 +789,97 @@ export async function driveVehicle(
   });
 }
 
+// --- Health (medicine, infection expiry, death + respawn) -------------------
+
+// Discard MEDICINE → clear infection. Available at any stage so the player
+// can cure themselves before/during a fight.
+export async function useMedicine(roomId: string, userId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const card = await tx.playerCard.findFirst({
+      where: { roomId, userId, cardKey: "medicine" },
+    });
+    if (!card) throw new EngineError("NO_MEDICINE", "Player has no medicine");
+    await tx.playerCard.delete({
+      where: { roomId_userId_cardKey: { roomId, userId, cardKey: "medicine" } },
+    });
+    const greenDeck = await tx.deck.findUnique({
+      where: { roomId_deck: { roomId, deck: "GREEN" } },
+    });
+    if (greenDeck) {
+      await tx.deck.update({
+        where: { roomId_deck: { roomId, deck: "GREEN" } },
+        data: { discard: [...((greenDeck.discard as string[]) ?? []), "medicine"] },
+      });
+    }
+    await tx.roomUser.update({
+      where: { roomId_userId: { roomId, userId } },
+      data: { infectedUntilTurn: null },
+    });
+  });
+}
+
+// At end-of-turn (after zombie turn), kill any player whose infection has
+// expired without a cure. Their cards return to the appropriate deck
+// discard piles, and they respawn on the spawn line if the game isn't over.
+async function resolveInfectionsAndDeaths(roomId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const turn = await tx.turn.findUnique({ where: { roomId } });
+    if (!turn) return;
+    const dying = await tx.roomUser.findMany({
+      where: {
+        roomId,
+        health: { gt: 0 },
+        infectedUntilTurn: { lte: turn.turnNumber, not: null },
+      },
+    });
+    for (const p of dying) {
+      // Return cards to their deck discards.
+      const cards = await tx.playerCard.findMany({
+        where: { roomId, userId: p.userId },
+      });
+      for (const c of cards) {
+        const card = findCardByKey(c.cardKey);
+        const deck = card
+          ? card.type === GAME.CARDS_TYPES.GUN
+            ? "RED"
+            : card.type === GAME.CARDS_TYPES.VEHICLE
+              ? "BLUE"
+              : "GREEN"
+          : "GREEN";
+        const d = await tx.deck.findUnique({
+          where: { roomId_deck: { roomId, deck } },
+        });
+        if (d) {
+          await tx.deck.update({
+            where: { roomId_deck: { roomId, deck } },
+            data: { discard: [...((d.discard as string[]) ?? []), c.cardKey] },
+          });
+        }
+      }
+      await tx.playerCard.deleteMany({ where: { roomId, userId: p.userId } });
+      // Mark dead temporarily, respawn at end if game isn't over.
+      await tx.roomUser.update({
+        where: { roomId_userId: { roomId, userId: p.userId } },
+        data: {
+          health: 0,
+          infectedUntilTurn: null,
+          position: null,
+          points: { decrement: Math.min(p.points, 25) }, // light death penalty
+        },
+      });
+    }
+    // If the game is still WAITING/PLAYING, respawn dead players at the
+    // spawn row (they'll pick a cell next turn via the existing tick logic).
+    const room = await tx.room.findUnique({ where: { id: roomId } });
+    if (room?.status === "PLAYING") {
+      await tx.roomUser.updateMany({
+        where: { roomId, health: 0 },
+        data: { health: 1 },
+      });
+    }
+  });
+}
+
 // Flee: skip the fight and continue moving with whatever movements remain.
 // No penalty for now; vehicle-assisted flee can be richer in 4.7.
 export async function fightFlee(roomId: string, userId: string): Promise<void> {
@@ -1003,10 +1094,11 @@ export async function tick(roomId: string): Promise<void> {
     return;
   }
 
-  // 4. MOVE stage with 0 movements left → run zombie turn, then cycle to
-  // the next player.
+  // 4. MOVE stage with 0 movements left → run zombie turn, resolve any
+  // expired infections (death + respawn), then cycle to the next player.
   if (turn.stage === TURN_STAGES.MOVE && turn.availableMovements === 0) {
     await runZombieTurn(roomId);
+    await resolveInfectionsAndDeaths(roomId);
 
     const ordered = [...room.users]
       .filter((u) => u.turnOrder !== null)

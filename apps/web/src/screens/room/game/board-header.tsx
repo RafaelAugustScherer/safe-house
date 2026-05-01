@@ -14,6 +14,7 @@ const BoardHeader = ({ myUserId, room }: BoardHeaderProps) => {
 
   const isMyTurn = turn.currentUserId === myUserId;
   const currentUser = users[turn.currentUserId];
+  const me = users[myUserId];
 
   const renderStatus = () => {
     if (turn.stage === TURN_STAGES.ROLL_INIT) return "Rolagem inicial...";
@@ -22,6 +23,9 @@ const BoardHeader = ({ myUserId, room }: BoardHeaderProps) => {
     return null;
   };
 
+  const infected =
+    me?.infectedUntilTurn != null && me.infectedUntilTurn >= turn.turnNumber;
+
   return (
     <div style={{ margin: "1rem", textAlign: "center" }}>
       {renderStatus()}
@@ -29,6 +33,11 @@ const BoardHeader = ({ myUserId, room }: BoardHeaderProps) => {
         <span style={{ marginLeft: "1rem" }}>
           Movimentos restantes: {turn.availableMovements}
         </span>
+      )}
+      {infected && (
+        <div style={{ color: "#e70000", marginTop: "0.5rem" }}>
+          ⚠ Infectado! Use a Bandagem antes do turno {(me!.infectedUntilTurn ?? 0) + 1}
+        </div>
       )}
     </div>
   );

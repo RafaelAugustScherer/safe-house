@@ -6,7 +6,7 @@ import FightModal from "./fight-modal";
 import VehicleInviteModal from "./vehicle-invite-modal";
 import { CardHand } from "../../../components";
 import { CARDS_TYPES, type AnyCard } from "../../../utils";
-import { useVehicle, type RoomSnapshot } from "../../../services";
+import { useVehicle, useMedicine, type RoomSnapshot } from "../../../services";
 
 interface GameProps {
   myUserId: string;
@@ -24,9 +24,12 @@ const Game = ({ myUserId, room, roomId }: GameProps) => {
         useVehicle(roomId, myUserId, card.key).catch((err) =>
           console.error("[vehicle:use]", err),
         );
+      } else if (card.key === "medicine") {
+        useMedicine(roomId, myUserId).catch((err) =>
+          console.error("[medicine]", err),
+        );
       }
-      // Other card types are handled by their context-specific modals
-      // (CROWBAR in LootModal, weapons in FightModal, MEDICINE in Step 4.8).
+      // CROWBAR is handled by LootModal, weapons by FightModal.
     },
     [roomId, myUserId],
   );

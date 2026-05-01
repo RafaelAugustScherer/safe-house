@@ -15,6 +15,7 @@ import {
   useVehicle,
   respondVehicleInvite,
   driveVehicle,
+  useMedicine,
   markUserOffline,
   scheduleRoomCleanup,
   tick,
@@ -244,6 +245,16 @@ export function registerHandlers(io: Server, socket: Socket): void {
     ) =>
       safe(async () => {
         await driveVehicle(input.roomId, input.userId, input.cell);
+        await broadcast(io, input.roomId);
+        return { ok: true as const };
+      }, ack),
+  );
+
+  socket.on(
+    "item:use-medicine",
+    (input: { roomId: string; userId: string }, ack: Ack<{ ok: true }>) =>
+      safe(async () => {
+        await useMedicine(input.roomId, input.userId);
         await broadcast(io, input.roomId);
         return { ok: true as const };
       }, ack),

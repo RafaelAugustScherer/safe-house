@@ -16,6 +16,7 @@ export interface RoomSnapshotUser {
   turnOrder: number | null;
   health: number;
   points: number;
+  infectedUntilTurn: number | null;
   isOwner: boolean;
   online: boolean;
 }
@@ -116,6 +117,9 @@ export const driveVehicle = (
   userId: string,
   cell: string,
 ): Promise<unknown> => emitAck("vehicle:drive", { roomId, userId, cell });
+
+export const useMedicine = (roomId: string, userId: string): Promise<unknown> =>
+  emitAck("item:use-medicine", { roomId, userId });
 
 // Subscribe to push events from a single room.
 export function onSnapshot(handler: (snap: RoomSnapshot) => void): () => void {

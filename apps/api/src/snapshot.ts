@@ -18,6 +18,7 @@ export interface RoomSnapshot {
       turnOrder: number | null;
       health: number;
       points: number;
+      infectedUntilTurn: number | null;
       isOwner: boolean;
       online: boolean;
     }
@@ -87,6 +88,7 @@ export async function buildSnapshot(roomId: string): Promise<RoomSnapshot | null
           turnOrder: u.turnOrder,
           health: u.health,
           points: u.points,
+          infectedUntilTurn: u.infectedUntilTurn,
           isOwner: u.isOwner,
           online: u.online,
         },
