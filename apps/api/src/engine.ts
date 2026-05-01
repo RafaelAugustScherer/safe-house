@@ -768,8 +768,11 @@ export async function tick(roomId: string): Promise<void> {
     return;
   }
 
-  // 4. MOVE stage with 0 movements left → cycle to next player.
+  // 4. MOVE stage with 0 movements left → run zombie turn, then cycle to
+  // the next player.
   if (turn.stage === TURN_STAGES.MOVE && turn.availableMovements === 0) {
+    await runZombieTurn(roomId);
+
     const ordered = [...room.users]
       .filter((u) => u.turnOrder !== null)
       .sort((a, b) => (a.turnOrder ?? 0) - (b.turnOrder ?? 0));
@@ -789,6 +792,64 @@ export async function tick(roomId: string): Promise<void> {
     });
     return;
   }
+}
+
+// Zombies + hordes move one cell toward the nearest living player. If a
+// zombie steps onto a player's cell, the player is infected (firearm rule
+// applies generically: 2 turns to consume MEDICINE or die in Step 4.8).
+async function runZombieTurn(roomId: string): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const players = await tx.roomUser.findMany({
+      where: { roomId, position: { not: null }, health: { gt: 0 } },
+    });
+    if (players.length === 0) return;
+    const zombies = await tx.zombie.findMany({ where: { roomId } });
+    const rows = Object.keys(BOARD) as BoardRow[];
+
+    for (const z of zombies) {
+      const [zRow, zCol] = parseCell(z.position);
+      const zRowIdx = rows.indexOf(zRow);
+      // Pick nearest player.
+      let target = players[0];
+      let bestDist = Infinity;
+      for (const p of players) {
+        if (!p.position) continue;
+        const [pRow, pCol] = parseCell(p.position);
+        const d = manhattan(zRowIdx, zCol, rows.indexOf(pRow), pCol);
+        if (d < bestDist) {
+          bestDist = d;
+          target = p;
+        }
+      }
+      if (!target.position) continue;
+      const [tRow, tCol] = parseCell(target.position);
+      const tRowIdx = rows.indexOf(tRow);
+      const dr = tRowIdx - zRowIdx;
+      const dc = tCol - zCol;
+      let nextRowIdx = zRowIdx;
+      let nextCol = zCol;
+      if (Math.abs(dr) >= Math.abs(dc) && dr !== 0) {
+        nextRowIdx = zRowIdx + Math.sign(dr);
+      } else if (dc !== 0) {
+        nextCol = zCol + Math.sign(dc);
+      }
+      const nextCell = `${rows[nextRowIdx]}${nextCol}`;
+      await tx.zombie.update({
+        where: { roomId_zombieId: { roomId, zombieId: z.zombieId } },
+        data: { position: nextCell },
+      });
+
+      // If the new cell is on a player, infect that player.
+      const onTopOf = players.find((p) => p.position === nextCell);
+      if (onTopOf) {
+        const cur = await tx.turn.findUnique({ where: { roomId } });
+        await tx.roomUser.update({
+          where: { roomId_userId: { roomId, userId: onTopOf.userId } },
+          data: { infectedUntilTurn: (cur?.turnNumber ?? 0) + 2 },
+        });
+      }
+    }
+  });
 }
 
 // Replicates `prepareAvaliableCells` from the original game.service.js:
