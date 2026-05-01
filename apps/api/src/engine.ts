@@ -554,6 +554,241 @@ export async function fightAttack(
   });
 }
 
+// --- Vehicles ---------------------------------------------------------------
+//
+// Solo: driver picks a destination within vehicle.value Manhattan cells of
+// their current position. The vehicle is discarded back to the blue deck and
+// a sound penalty is applied.
+// Duo: when the vehicle's `duo` flag is true and an ally is adjacent, the
+// engine first transitions to VEHICLE_INVITE and waits for the ally to
+// accept/decline before moving.
+
+// availableCells layout for vehicle stages:
+//   [0] = vehicle card key
+//   [1] = passenger userId (after accepted duo invite, or "" for solo)
+//   [2] = invitee userId (only during VEHICLE_INVITE)
+
+export async function useVehicle(
+  roomId: string,
+  userId: string,
+  vehicleKey: string,
+): Promise<{ inviting: string | null }> {
+  return prisma.$transaction(async (tx) => {
+    const turn = must(
+      await tx.turn.findUnique({ where: { roomId } }),
+      "TURN_NOT_FOUND",
+      "Turn not initialized",
+    );
+    if (turn.currentUserId !== userId) {
+      throw new EngineError("NOT_YOUR_TURN", "Not your turn");
+    }
+    // Vehicles can only start a journey from the ordinary movement stages.
+    if (turn.stage !== TURN_STAGES.MOVE && turn.stage !== TURN_STAGES.MOVE_ROLL) {
+      throw new EngineError("WRONG_STAGE", `Cannot use vehicle in stage ${turn.stage}`);
+    }
+    const card = findCardByKey(vehicleKey);
+    if (!card || !("value" in card) || !("duo" in card)) {
+      throw new EngineError("NOT_A_VEHICLE", "Card is not a vehicle");
+    }
+    const inHand = await tx.playerCard.findFirst({
+      where: { roomId, userId, cardKey: vehicleKey },
+    });
+    if (!inHand) throw new EngineError("VEHICLE_NOT_IN_HAND", "Vehicle not in hand");
+
+    if (card.duo) {
+      // Look for an adjacent ally to invite.
+      const driver = await tx.roomUser.findUnique({
+        where: { roomId_userId: { roomId, userId } },
+      });
+      if (driver?.position) {
+        const [dRow, dCol] = parseCell(driver.position);
+        const rows = Object.keys(BOARD) as BoardRow[];
+        const dRowIdx = rows.indexOf(dRow);
+        const adj = [
+          dCol > 1 ? `${dRow}${dCol - 1}` : null,
+          dCol < 8 ? `${dRow}${dCol + 1}` : null,
+          dRowIdx > 0 ? `${rows[dRowIdx - 1]}${dCol}` : null,
+          dRowIdx < rows.length - 1 ? `${rows[dRowIdx + 1]}${dCol}` : null,
+        ].filter((c): c is string => !!c);
+        const allies = await tx.roomUser.findMany({
+          where: { roomId, position: { in: adj }, userId: { not: userId } },
+        });
+        if (allies.length > 0) {
+          const invitee = allies[0];
+          await tx.turn.update({
+            where: { roomId },
+            data: {
+              stage: TURN_STAGES.VEHICLE_INVITE,
+              availableCells: [vehicleKey, "", invitee.userId],
+            },
+          });
+          return { inviting: invitee.userId };
+        }
+      }
+    }
+
+    // Solo (or duo with no ally): straight to VEHICLE_MOVE.
+    const driver2 = await tx.roomUser.findUnique({
+      where: { roomId_userId: { roomId, userId } },
+    });
+    const reach = driver2?.position
+      ? reachableCells(driver2.position, card.value)
+      : [];
+    await tx.turn.update({
+      where: { roomId },
+      data: {
+        stage: TURN_STAGES.VEHICLE_MOVE,
+        availableCells: [vehicleKey, "", ...reach],
+      },
+    });
+    return { inviting: null };
+  });
+}
+
+// All cells within Manhattan distance ≤ range, excluding the origin.
+function reachableCells(origin: string, range: number): string[] {
+  const rows = Object.keys(BOARD) as BoardRow[];
+  const [oRow, oCol] = parseCell(origin);
+  const oRowIdx = rows.indexOf(oRow);
+  const out: string[] = [];
+  for (let dr = -range; dr <= range; dr++) {
+    for (let dc = -range; dc <= range; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      if (Math.abs(dr) + Math.abs(dc) > range) continue;
+      const r = oRowIdx + dr;
+      const c = oCol + dc;
+      if (r < 0 || r >= rows.length || c < 1 || c > 8) continue;
+      out.push(`${rows[r]}${c}`);
+    }
+  }
+  return out;
+}
+
+export async function respondVehicleInvite(
+  roomId: string,
+  userId: string,
+  accept: boolean,
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const turn = must(
+      await tx.turn.findUnique({ where: { roomId } }),
+      "TURN_NOT_FOUND",
+      "Turn not initialized",
+    );
+    if (turn.stage !== TURN_STAGES.VEHICLE_INVITE) {
+      throw new EngineError("WRONG_STAGE", "No invite to respond to");
+    }
+    const cells = (turn.availableCells as string[]) ?? [];
+    if (cells[2] !== userId) {
+      throw new EngineError("NOT_INVITEE", "You are not the invited passenger");
+    }
+    const card = findCardByKey(cells[0]);
+    const range = card && "value" in card ? card.value : 0;
+    const driver = await tx.roomUser.findUnique({
+      where: { roomId_userId: { roomId, userId: turn.currentUserId } },
+    });
+    const reach = driver?.position ? reachableCells(driver.position, range) : [];
+    await tx.turn.update({
+      where: { roomId },
+      data: {
+        stage: TURN_STAGES.VEHICLE_MOVE,
+        availableCells: [cells[0], accept ? userId : "", ...reach],
+      },
+    });
+  });
+}
+
+export async function driveVehicle(
+  roomId: string,
+  userId: string,
+  destCell: string,
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const turn = must(
+      await tx.turn.findUnique({ where: { roomId } }),
+      "TURN_NOT_FOUND",
+      "Turn not initialized",
+    );
+    if (turn.currentUserId !== userId) {
+      throw new EngineError("NOT_YOUR_TURN", "Not your turn");
+    }
+    if (turn.stage !== TURN_STAGES.VEHICLE_MOVE) {
+      throw new EngineError("WRONG_STAGE", `Cannot drive in stage ${turn.stage}`);
+    }
+    const cells = (turn.availableCells as string[]) ?? [];
+    const vehicleKey = cells[0];
+    const passengerUserId = cells[1] || null;
+    const card = findCardByKey(vehicleKey);
+    if (!card || !("value" in card)) {
+      throw new EngineError("INVALID_VEHICLE", "Vehicle card missing");
+    }
+    const driver = must(
+      await tx.roomUser.findUnique({ where: { roomId_userId: { roomId, userId } } }),
+      "USER_NOT_FOUND",
+      "Driver not found",
+    );
+    if (!driver.position) {
+      throw new EngineError("NO_POSITION", "Driver not on board");
+    }
+
+    const rows = Object.keys(BOARD) as BoardRow[];
+    const [dRow, dCol] = parseCell(driver.position);
+    const [tRow, tCol] = parseCell(destCell);
+    const dist = manhattan(rows.indexOf(dRow), dCol, rows.indexOf(tRow), tCol);
+    if (dist === 0 || dist > card.value) {
+      throw new EngineError("OUT_OF_RANGE", `Vehicle can travel up to ${card.value} cells`);
+    }
+
+    // Move driver and passenger.
+    await tx.roomUser.update({
+      where: { roomId_userId: { roomId, userId } },
+      data: { position: destCell },
+    });
+    if (passengerUserId) {
+      await tx.roomUser.update({
+        where: { roomId_userId: { roomId, userId: passengerUserId } },
+        data: { position: destCell },
+      });
+    }
+
+    // Discard vehicle to blue deck's discard pile.
+    await tx.playerCard.delete({
+      where: { roomId_userId_cardKey: { roomId, userId, cardKey: vehicleKey } },
+    });
+    const blueDeck = await tx.deck.findUnique({
+      where: { roomId_deck: { roomId, deck: "BLUE" } },
+    });
+    if (blueDeck) {
+      await tx.deck.update({
+        where: { roomId_deck: { roomId, deck: "BLUE" } },
+        data: { discard: [...((blueDeck.discard as string[]) ?? []), vehicleKey] },
+      });
+    }
+
+    // Vehicles are noisy: apply sound penalty at the new position.
+    await applySoundPenalty(tx, roomId, destCell);
+
+    // Reaching row 'a' on a vehicle counts as winning.
+    if (destCell.startsWith("a")) {
+      await tx.room.update({
+        where: { id: roomId },
+        data: { status: "FINISHED" },
+      });
+      await tx.roomUser.update({
+        where: { roomId_userId: { roomId, userId } },
+        data: { points: { increment: 100 } },
+      });
+      return;
+    }
+
+    // Return to MOVE stage; remaining movements (if any) carry over.
+    await tx.turn.update({
+      where: { roomId },
+      data: { stage: TURN_STAGES.MOVE, availableCells: [] },
+    });
+  });
+}
+
 // Flee: skip the fight and continue moving with whatever movements remain.
 // No penalty for now; vehicle-assisted flee can be richer in 4.7.
 export async function fightFlee(roomId: string, userId: string): Promise<void> {

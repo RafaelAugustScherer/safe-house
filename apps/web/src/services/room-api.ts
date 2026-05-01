@@ -98,6 +98,25 @@ export const fightAttack = (
 export const fightFlee = (roomId: string, userId: string): Promise<unknown> =>
   emitAck("fight:flee", { roomId, userId });
 
+export const useVehicle = (
+  roomId: string,
+  userId: string,
+  vehicleKey: string,
+): Promise<{ inviting: string | null }> =>
+  emitAck("vehicle:use", { roomId, userId, vehicleKey });
+
+export const respondVehicleInvite = (
+  roomId: string,
+  userId: string,
+  accept: boolean,
+): Promise<unknown> => emitAck("vehicle:respond", { roomId, userId, accept });
+
+export const driveVehicle = (
+  roomId: string,
+  userId: string,
+  cell: string,
+): Promise<unknown> => emitAck("vehicle:drive", { roomId, userId, cell });
+
 // Subscribe to push events from a single room.
 export function onSnapshot(handler: (snap: RoomSnapshot) => void): () => void {
   const sock = getSocket();

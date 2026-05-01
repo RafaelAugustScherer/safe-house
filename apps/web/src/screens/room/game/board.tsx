@@ -1,6 +1,6 @@
 import React, { useCallback } from "react";
 import styled from "styled-components";
-import { playerMove, type RoomSnapshot } from "../../../services";
+import { playerMove, driveVehicle, type RoomSnapshot } from "../../../services";
 import { BOARD, GAME, TURN_STAGES } from "../../../utils";
 import BoardHeader from "./board-header";
 
@@ -14,18 +14,26 @@ const Board = ({ myUserId, room, roomId }: BoardProps) => {
   const { zombies, turn, users } = room;
   const players = Object.values(users);
 
-  const handleMove = useCallback(
-    (cell: string) => {
-      playerMove(roomId, myUserId, cell).catch((err) => {
-        console.error("[move]", err);
-      });
-    },
-    [roomId, myUserId],
-  );
-
   const myTurn = turn?.currentUserId === myUserId;
   const inMoveStage = turn?.stage === TURN_STAGES.MOVE && (turn?.availableMovements ?? 0) > 0;
-  const availableCells = myTurn && inMoveStage ? (turn?.availableCells ?? []) : [];
+  const inVehicleStage = turn?.stage === TURN_STAGES.VEHICLE_MOVE;
+  const availableCells = myTurn
+    ? inMoveStage
+      ? (turn?.availableCells ?? [])
+      : inVehicleStage
+        ? (turn?.availableCells ?? []).slice(2) // skip [vehicleKey, passengerId]
+        : []
+    : [];
+
+  const handleMove = useCallback(
+    (cell: string) => {
+      const action = inVehicleStage
+        ? driveVehicle(roomId, myUserId, cell)
+        : playerMove(roomId, myUserId, cell);
+      action.catch((err) => console.error("[move]", err));
+    },
+    [roomId, myUserId, inVehicleStage],
+  );
 
   const renderCell = (lineId: string, cellIndex: number) => {
     const cellId = `${lineId}${cellIndex}`;

@@ -12,6 +12,9 @@ import {
   useCrowbar,
   fightAttack,
   fightFlee,
+  useVehicle,
+  respondVehicleInvite,
+  driveVehicle,
   markUserOffline,
   scheduleRoomCleanup,
   tick,
@@ -202,6 +205,45 @@ export function registerHandlers(io: Server, socket: Socket): void {
     (input: { roomId: string; userId: string }, ack: Ack<{ ok: true }>) =>
       safe(async () => {
         await fightFlee(input.roomId, input.userId);
+        await broadcast(io, input.roomId);
+        return { ok: true as const };
+      }, ack),
+  );
+
+  socket.on(
+    "vehicle:use",
+    (
+      input: { roomId: string; userId: string; vehicleKey: string },
+      ack: Ack<{ inviting: string | null }>,
+    ) =>
+      safe(async () => {
+        const result = await useVehicle(input.roomId, input.userId, input.vehicleKey);
+        await broadcast(io, input.roomId);
+        return result;
+      }, ack),
+  );
+
+  socket.on(
+    "vehicle:respond",
+    (
+      input: { roomId: string; userId: string; accept: boolean },
+      ack: Ack<{ ok: true }>,
+    ) =>
+      safe(async () => {
+        await respondVehicleInvite(input.roomId, input.userId, input.accept);
+        await broadcast(io, input.roomId);
+        return { ok: true as const };
+      }, ack),
+  );
+
+  socket.on(
+    "vehicle:drive",
+    (
+      input: { roomId: string; userId: string; cell: string },
+      ack: Ack<{ ok: true }>,
+    ) =>
+      safe(async () => {
+        await driveVehicle(input.roomId, input.userId, input.cell);
         await broadcast(io, input.roomId);
         return { ok: true as const };
       }, ack),
