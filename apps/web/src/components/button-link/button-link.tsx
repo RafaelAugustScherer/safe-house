@@ -2,13 +2,13 @@ import React from "react";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
 
-const Button = ({ children, ...rest }) => {
-  return <StyledButton {...rest}>{children}</StyledButton>;
-};
+interface ButtonLinkProps {
+  href: string;
+  children: React.ReactNode;
+  className?: string;
+}
 
-export default Button;
-
-const StyledLink = ({ children, className, href }) => (
+const StyledLink = ({ children, className, href }: ButtonLinkProps) => (
   <Link to={href} className={className}>
     {children}
   </Link>
@@ -31,3 +31,9 @@ const StyledButton = styled(StyledLink)`
     border-color: ${({ theme }) => theme.colors.primary};
   }
 `;
+
+const ButtonLink = ({ children, ...rest }: ButtonLinkProps) => {
+  return <StyledButton {...rest}>{children}</StyledButton>;
+};
+
+export default ButtonLink;

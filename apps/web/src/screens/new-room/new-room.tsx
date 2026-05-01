@@ -2,43 +2,39 @@ import React, { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { Button, Title, Input, Header } from "../../components";
-import { firebaseCreateRoom } from "../../services";
+import { createRoom } from "../../services";
 import * as s from "../../styles/global";
 import { getUniqueId } from "../../utils";
 
 const NewRoom = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  let localUsername = localStorage.getItem("username");
+  const localUsername = localStorage.getItem("username") ?? "Jogador";
 
   const handleCreateRoom = useCallback(
-    async (e) => {
+    async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
-      const formData = new FormData(e.target);
-      const { password, password2, name } = Object.fromEntries(formData);
-      if (password && password !== password2)
-        alert("A duas senhas informadas não são iguais!");
-      else {
-        setLoading(true);
-        let room = {
-          maxUsers: 2,
+      const formData = new FormData(e.currentTarget);
+      const name = String(formData.get("name") ?? "");
+      const maxUsers = Number(formData.get("maxUsers") ?? 2);
+
+      setLoading(true);
+      try {
+        const { roomId } = await createRoom({
           name,
-          owner: localUsername,
-          status: "waiting",
-        };
-        if (password) room.password = password;
-        const uid = getUniqueId();
-        firebaseCreateRoom(uid, room, () =>
-          navigate(`/room/${uid}`, { replace: true })
-        )
-          .catch((error) => {
-            console.log(`CATCH`, error);
-            alert("Ocorreu um erro ao tentar criar sua sala!");
-          })
-          .finally(() => setLoading(false));
+          maxUsers,
+          ownerUserId: getUniqueId(),
+          ownerUsername: localUsername,
+        });
+        navigate(`/room/${roomId}`, { replace: true });
+      } catch (error) {
+        console.error("[new-room]", error);
+        alert("Ocorreu um erro ao tentar criar sua sala!");
+      } finally {
+        setLoading(false);
       }
     },
-    [localUsername, navigate]
+    [localUsername, navigate],
   );
 
   return (
@@ -49,10 +45,15 @@ const NewRoom = () => {
         <Form onSubmit={handleCreateRoom}>
           <label>Nome da sala*</label>
           <Input required name="name" disabled={loading} />
-          <label>Senha</label>
-          <Input name="password" type="password" disabled={loading} />
-          <label>Repita a senha</label>
-          <Input name="password2" type="password" disabled={loading} />
+          <label>Número máximo de jogadores</label>
+          <Input
+            name="maxUsers"
+            type="number"
+            min={2}
+            max={5}
+            defaultValue={2}
+            disabled={loading}
+          />
           <Button type="submit" disabled={loading}>
             {loading ? "Criando..." : "Criar Sala"}
           </Button>

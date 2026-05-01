@@ -1,7 +1,12 @@
 import React from "react";
 import styled from "styled-components";
 
-const Title = ({ legend, title }) => {
+interface TitleProps {
+  legend?: string;
+  title?: string;
+}
+
+const Title = ({ legend, title }: TitleProps) => {
   return (
     <>
       <TitleH1>{title || "Safe House"}</TitleH1>

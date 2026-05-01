@@ -3,12 +3,12 @@ import styled from "styled-components";
 import { RequestUsername, User } from "..";
 
 const Header = () => {
-  const [username, setUsername] = useState(false);
+  const [username, setUsername] = useState<string | null>(null);
   const [usernameModal, setUsernameModal] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      let localUsername = localStorage.getItem("username");
+      const localUsername = localStorage.getItem("username");
       if (localUsername) setUsername(localUsername);
       else setUsernameModal(true);
     }
@@ -23,7 +23,7 @@ const Header = () => {
       )}
       {usernameModal && (
         <RequestUsername
-          oldUsername={username}
+          oldUsername={username ?? undefined}
           setUsername={(newUsername) => {
             setUsername(newUsername);
             setUsernameModal(false);

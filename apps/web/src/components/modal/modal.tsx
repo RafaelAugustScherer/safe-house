@@ -1,7 +1,7 @@
 import React from "react";
 import styled from "styled-components";
 
-const Modal = ({ children }) => {
+const Modal = ({ children }: { children: React.ReactNode }) => {
   return (
     <Container>
       <Content>{children}</Content>
