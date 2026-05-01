@@ -75,16 +75,31 @@ const Room = () => {
 
   if (room?.status === "FINISHED") {
     const winner = room.userWinner ? room.users[room.userWinner]?.username : "—";
+    const ranked = [...users].sort((a, b) => b.points - a.points);
     return (
       <s.Container>
         <Header />
         <s.Main>
-          <Title legend={`Vencedor: ${winner}`} title={room.name} />
-          <div>
-            {users.map((user, i) => (
-              <User user={user} key={user.userId} index={i} showLabel />
-            ))}
-          </div>
+          <Title legend={`🏆 Vencedor: ${winner}`} title={room.name} />
+          <table style={{ marginTop: "1.5rem", borderSpacing: "1rem 0.25rem" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left" }}>Jogador</th>
+                <th style={{ textAlign: "right" }}>Pontos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranked.map((u) => (
+                <tr key={u.userId}>
+                  <td>
+                    {u.userId === room.userWinner ? "🏆 " : ""}
+                    {u.username}
+                  </td>
+                  <td style={{ textAlign: "right" }}>{u.points}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <Button onClick={() => navigate("/")} size="small" style={{ marginTop: "40px" }}>
             Sair
           </Button>

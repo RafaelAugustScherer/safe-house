@@ -1,4 +1,5 @@
 import React, { useCallback } from "react";
+import styled from "styled-components";
 import Board from "./board";
 import UserRolls from "./user-rolls";
 import LootModal from "./loot-modal";
@@ -42,8 +43,35 @@ const Game = ({ myUserId, room, roomId }: GameProps) => {
       <VehicleInviteModal myUserId={myUserId} room={room} roomId={roomId} />
       <Board myUserId={myUserId} room={room} roomId={roomId} />
       <CardHand cardKeys={myCards} onPlay={myTurn ? handlePlay : undefined} />
+      <Scoreboard>
+        {Object.values(room.users).map((u) => (
+          <li key={u.userId}>
+            <strong>{u.username}</strong>
+            {": "}
+            {u.points} pts
+            {u.infectedUntilTurn != null &&
+              room.turn &&
+              u.infectedUntilTurn >= room.turn.turnNumber && (
+                <span style={{ color: "#e70000" }}> ⚠ infectado</span>
+              )}
+            {u.userId === room.turn?.currentUserId && " 🎲"}
+          </li>
+        ))}
+      </Scoreboard>
     </>
   );
 };
 
 export default Game;
+
+const Scoreboard = styled.ul`
+  list-style: none;
+  margin: 1rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid ${({ theme }) => theme.colors.gray};
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.95rem;
+`;

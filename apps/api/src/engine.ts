@@ -331,13 +331,13 @@ export async function playerMove(
     }
 
     if (cell === ACTIONS.WIN) {
-      await tx.room.update({
-        where: { id: roomId },
-        data: { status: "FINISHED" },
-      });
       await tx.roomUser.update({
         where: { roomId_userId: { roomId, userId } },
-        data: { points: { increment: 100 } }, // base reward; refined in Step 4.9
+        data: { points: { increment: 100 } },
+      });
+      await tx.room.update({
+        where: { id: roomId },
+        data: { status: "FINISHED", winnerUserId: userId },
       });
       return { won: true };
     }
@@ -770,13 +770,13 @@ export async function driveVehicle(
 
     // Reaching row 'a' on a vehicle counts as winning.
     if (destCell.startsWith("a")) {
-      await tx.room.update({
-        where: { id: roomId },
-        data: { status: "FINISHED" },
-      });
       await tx.roomUser.update({
         where: { roomId_userId: { roomId, userId } },
         data: { points: { increment: 100 } },
+      });
+      await tx.room.update({
+        where: { id: roomId },
+        data: { status: "FINISHED", winnerUserId: userId },
       });
       return;
     }

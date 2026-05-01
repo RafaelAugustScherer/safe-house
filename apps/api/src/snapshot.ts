@@ -120,9 +120,6 @@ export async function buildSnapshot(roomId: string): Promise<RoomSnapshot | null
     ),
     cards: cardsByUser,
     deckCounts,
-    userWinner:
-      room.status === "FINISHED"
-        ? (room.users.find((u) => u.position?.startsWith("a"))?.userId ?? null)
-        : null,
+    userWinner: room.winnerUserId ?? null,
   };
 }
