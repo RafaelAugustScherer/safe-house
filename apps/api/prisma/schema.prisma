@@ -1,0 +1,149 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoomStatus {
+  WAITING
+  PLAYING
+  FINISHED
+}
+
+enum ZombieKind {
+  SINGLE
+  HORDE
+}
+
+enum DeckColor {
+  RED
+  GREEN
+  BLUE
+}
+
+enum CardSlot {
+  ITEM
+  WEAPON
+  VEHICLE
+}
+
+enum TileType {
+  EMPTY
+  CHEST
+  TENT
+}
+
+model Room {
+  id          String       @id @default(cuid())
+  name        String
+  ownerUserId String
+  maxUsers    Int
+  status      RoomStatus   @default(WAITING)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  users       RoomUser[]
+  turn        Turn?
+  zombies     Zombie[]
+  decks       Deck[]
+  cards       PlayerCard[]
+  tiles       BoardTile[]
+  events      GameEvent[]
+
+  @@map("rooms")
+}
+
+model RoomUser {
+  roomId            String
+  userId            String
+  username          String
+  position          String?
+  health            Int       @default(1)
+  infectedUntilTurn Int?
+  points            Int       @default(0)
+  isOwner           Boolean   @default(false)
+  initRollValue     Int?
+  turnOrder         Int?
+  joinedAt          DateTime  @default(now())
+  online            Boolean   @default(true)
+  room              Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  cards             PlayerCard[]
+
+  @@id([roomId, userId])
+  @@map("room_users")
+}
+
+model Turn {
+  roomId             String   @id
+  currentUserId      String
+  stage              String
+  availableMovements Int      @default(0)
+  availableCells     Json
+  diceA              Int?
+  diceB              Int?
+  turnNumber         Int      @default(0)
+  updatedAt          DateTime @updatedAt
+  room               Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("turns")
+}
+
+model Zombie {
+  roomId   String
+  zombieId Int
+  position String
+  kind     ZombieKind
+  room     Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, zombieId])
+  @@map("zombies")
+}
+
+model Deck {
+  roomId  String
+  deck    DeckColor
+  cards   Json
+  discard Json
+  room    Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, deck])
+  @@map("decks")
+}
+
+model PlayerCard {
+  roomId  String
+  userId  String
+  cardKey String
+  slot    CardSlot
+  room    Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user    RoomUser @relation(fields: [roomId, userId], references: [roomId, userId], onDelete: Cascade)
+
+  @@id([roomId, userId, cardKey])
+  @@map("player_cards")
+}
+
+model BoardTile {
+  roomId   String
+  cell     String
+  tileType TileType
+  looted   Boolean  @default(false)
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, cell])
+  @@map("board_tiles")
+}
+
+model GameEvent {
+  id        String   @id @default(cuid())
+  roomId    String
+  kind      String
+  payload   Json
+  createdAt DateTime @default(now())
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@map("game_events")
+}
