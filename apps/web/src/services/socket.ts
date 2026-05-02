@@ -10,7 +10,10 @@ let _socket: Socket | null = null;
 export function getSocket(): Socket {
   if (_socket) return _socket;
   _socket = io(API_URL, {
-    transports: ["websocket"],
+    // Default transports: ['polling', 'websocket']. Polling-first survives
+    // Cloudflare Tunnel + reverse-proxy stacks where the bare WS upgrade
+    // sometimes fails; Socket.IO will upgrade to WS as soon as the handshake
+    // is done.
     autoConnect: true,
   });
   return _socket;
