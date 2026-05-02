@@ -1,64 +1,60 @@
 import React from "react";
 import styled from "styled-components";
 import { findCardByKey, type AnyCard } from "../../utils";
+import ItemCard from "../item-card/item-card";
 
 interface CardHandProps {
   cardKeys: string[];
+  selectedKey?: string | null;
+  onSelect?: (key: string | null) => void;
   onPlay?: (card: AnyCard) => void;
 }
 
-const CardHand = ({ cardKeys, onPlay }: CardHandProps) => {
-  const cards = cardKeys.map((k) => findCardByKey(k)).filter((c): c is AnyCard => !!c);
+// Click semantics:
+//   - first click on a card    -> selects it (rail shows details)
+//   - second click on selected -> plays it (existing onPlay flow)
+//   - click another card       -> moves selection
+const CardHand = ({ cardKeys, selectedKey, onSelect, onPlay }: CardHandProps) => {
+  const cards = cardKeys
+    .map((k) => findCardByKey(k))
+    .filter((c): c is AnyCard => !!c);
   if (cards.length === 0) return null;
+
+  const handleClick = (card: AnyCard, instanceKey: string) => {
+    const isSelected = selectedKey === instanceKey;
+    if (isSelected && onPlay) {
+      onPlay(card);
+      return;
+    }
+    onSelect?.(instanceKey);
+  };
+
   return (
     <HandRow>
-      {cards.map((c, i) => (
-        <Card
-          key={`${c.key}-${i}`}
-          $type={c.type}
-          title={c.description}
-          onClick={onPlay ? () => onPlay(c) : undefined}
-          $clickable={!!onPlay}
-        >
-          <strong>{c.name}</strong>
-          <small>{c.type}</small>
-        </Card>
-      ))}
+      {cards.map((c, i) => {
+        const instanceKey = `${c.key}-${i}`;
+        const selected = selectedKey === instanceKey;
+        const clickable = !!onSelect || !!onPlay;
+        return (
+          <ItemCard
+            key={instanceKey}
+            card={c}
+            selected={selected}
+            clickable={clickable}
+            onClick={clickable ? () => handleClick(c, instanceKey) : undefined}
+          />
+        );
+      })}
     </HandRow>
   );
 };
 
 export default CardHand;
 
-const colorByType: Record<string, string> = {
-  heal: "#10cc42",
-  store: "#10cc42",
-  tool: "#10cc42",
-  consumable: "#10cc42",
-  gun: "#e70000",
-  vehicle: "#3a7bd5",
-};
-
 const HandRow = styled.div`
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.75rem;
   margin: 1rem;
   justify-content: center;
-`;
-
-const Card = styled.div<{ $type: string; $clickable: boolean }>`
-  background: ${({ $type }) => colorByType[$type] ?? "#666"};
-  color: white;
-  padding: 0.5rem 0.75rem;
-  border-radius: 4px;
-  min-width: 100px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  cursor: ${({ $clickable }) => ($clickable ? "pointer" : "default")};
-  small {
-    opacity: 0.7;
-    font-size: 0.8rem;
-  }
 `;
