@@ -1,28 +1,33 @@
 {
-	# Auto-disable HTTPS unless PUBLIC_DOMAIN is set; the runtime image then
-	# only listens on :80 and the operator can put a TLS-terminating proxy
-	# in front, OR use the public URL directly with auto-HTTPS.
+	# Cloudflare Tunnel terminates TLS at the edge, so Caddy serves plain HTTP.
 	auto_https off
 }
 
-# Listen on all hostnames; PUBLIC_DOMAIN is just a hint for cert issuance.
 {$PUBLIC_DOMAIN::80} {
-	# WebSocket + Socket.IO traffic.
-	@socketio path /socket.io/*
-	reverse_proxy @socketio api:4000
-
-	# Optional REST endpoints.
-	@api path /api/*
-	reverse_proxy @api api:4000
-
-	# Health from the api (handy for Docker healthchecks via the proxy).
-	@health path /health
-	reverse_proxy @health api:4000
-
-	# Static SPA: try the file, otherwise fall back to index.html.
-	root * /srv/web
-	try_files {path} /index.html
-	file_server
-
 	encode gzip
+
+	# WebSocket + Socket.IO traffic. handle blocks are mutually exclusive —
+	# they short-circuit before any rewrite runs, so try_files below cannot
+	# accidentally rewrite /socket.io/... to /index.html.
+	handle /socket.io/* {
+		reverse_proxy api:4000
+	}
+
+	# REST endpoints (currently unused, reserved).
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+
+	# Health endpoint proxied for convenience (e.g. from cloudflared).
+	handle /health {
+		reverse_proxy api:4000
+	}
+
+	# Static SPA: try the file, otherwise fall back to index.html so client
+	# routes (e.g. /room/:id) are served by React Router.
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
 }
